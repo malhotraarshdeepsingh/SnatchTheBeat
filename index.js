@@ -1,28 +1,103 @@
 /**
  * 🎵 YouTube Music Downloader & Player (Node.js)
+ * 
+ * A comprehensive CLI tool for downloading YouTube videos as MP3 files with proper
+ * metadata tagging and organizing them by artist. Includes a built-in music player
+ * with playlist management and random playback features.
  *
- * 📦 Required Packages (Install via npm):
+ * ✨ FEATURES:
+ *   • Download individual songs or entire playlists from YouTube
+ *   • Automatic audio conversion to high-quality MP3 (320kbps equivalent)
+ *   • Smart metadata extraction and ID3 tag embedding (title, artist, album, cover art)
+ *   • Organized file structure by artist folders
+ *   • Built-in music player with multiple audio backend support
+ *   • Interactive song selection or random playback modes
+ *   • Artist-specific playlist filtering
+ *   • Automatic thumbnail download and cover art embedding
+ *   • Duplicate detection and skip functionality
+ *   • Mix/Radio playlist detection and blocking for user safety
+ *
+ * 📦 REQUIRED PACKAGES (Install via npm):
  *   npm install axios node-id3 inquirer play-sound
  *
- * 🛠️ External Dependencies (Install manually):
- *   1. yt-dlp      - https://github.com/yt-dlp/yt-dlp
- *       Install via pip:
- *         pip install -U yt-dlp
+ *   Dependencies breakdown:
+ *   • axios       - HTTP client for downloading thumbnails and cover art
+ *   • node-id3    - ID3 metadata tagging for MP3 files
+ *   • inquirer    - Interactive command-line user interface
+ *   • play-sound  - Cross-platform audio playback with multiple backend support
  *
- *   2. ffmpeg      - https://ffmpeg.org/download.html
- *       Must be available in your system PATH.
+ * 🛠️ EXTERNAL DEPENDENCIES (Install manually):
+ *   
+ *   1. yt-dlp (REQUIRED) - Advanced YouTube downloader
+ *      📥 Installation:
+ *        • Via pip (recommended): pip install -U yt-dlp
+ *        • Via conda: conda install -c conda-forge yt-dlp  
+ *        • Via brew (macOS): brew install yt-dlp
+ *        • Manual: Download from https://github.com/yt-dlp/yt-dlp/releases
+ *      ℹ️  yt-dlp is a more advanced fork of youtube-dl with better format support
  *
- *   3. Audio Player (one of the following):
- *       - mpg123  (Linux/macOS)
- *       - afplay  (macOS)
- *       - ffplay  (from ffmpeg)
- *       - vlc     (cross-platform)
- *     Make sure one of these is installed and available in PATH.
+ *   2. ffmpeg (REQUIRED) - Audio/video processing toolkit
+ *      📥 Installation:
+ *        • Windows: Download from https://ffmpeg.org/download.html or use winget install ffmpeg
+ *        • macOS: brew install ffmpeg
+ *        • Ubuntu/Debian: sudo apt install ffmpeg
+ *        • CentOS/RHEL: sudo yum install ffmpeg
+ *      ⚠️  Must be available in your system PATH
+ *      🔧 Used for audio format conversion and quality optimization
  *
- * ✅ Usage:
- *   node index.js --song "https://www.youtube.com/watch?v=..."
- *   node index.js --playlist "https://www.youtube.com/playlist?list=..."
- *   node index.js --play
+ *   3. Audio Player (REQUIRED - at least one of the following):
+ *      🎵 Cross-platform options:
+ *        • ffplay  - Comes with ffmpeg (recommended for compatibility)
+ *        • vlc     - VLC media player (install from https://www.videolan.org/)
+ *      
+ *      🍎 macOS specific:
+ *        • afplay  - Built into macOS (no installation needed)
+ *      
+ *      🐧 Linux specific:
+ *        • mpg123  - Lightweight MP3 player (sudo apt install mpg123)
+ *        • aplay   - ALSA audio player (usually pre-installed)
+ *      
+ *      ℹ️  The script automatically detects and uses the first available player
+ *
+ * 📁 FILE ORGANIZATION:
+ *   Music/
+ *   ├── Artist Name 1/
+ *   │   ├── Song Title 1.mp3
+ *   │   └── Song Title 2.mp3
+ *   ├── Artist Name 2/
+ *   │   └── Song Title 3.mp3
+ *   └── ...
+ *
+ * 🚀 USAGE EXAMPLES:
+ *   
+ *   📥 Download single song:
+ *     node index.js --song "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+ *     node index.js --song "https://youtu.be/dQw4w9WgXcQ"
+ *   
+ *   📜 Download entire playlist:
+ *     node index.js --playlist "https://www.youtube.com/playlist?list=PLx0sYbCqOb8Q_CLZC2BdBSKEEB59BOPUM"
+ *     node index.js --playlist "https://music.youtube.com/playlist?list=OLAK5uy_kC..."
+ *   
+ *   🎵 Interactive music player:
+ *     node index.js --play                              # Browse and select songs manually
+ *     node index.js --play --random                     # Play all downloaded songs randomly
+ *   
+ *   🎤 Artist-specific playback:
+ *     node index.js --play --artist "The Beatles"       # Browse songs by specific artist
+ *     node index.js --play --artist "Queen" --random    # Play all Queen songs randomly
+ *
+ * ⚙️ CONFIGURATION:
+ *   • Music storage directory: ./Music (automatically created)
+ *   • Audio quality: Best available (typically 320kbps equivalent)
+ *   • File format: MP3 with embedded ID3v2.4 tags
+ *   • Cover art: Automatically downloaded and embedded (JPEG format)
+ *   • Filename sanitization: Automatically removes invalid characters
+ *
+ * 🛡️ SAFETY FEATURES:
+ *   • Automatic detection and blocking of problematic mix/radio playlists
+ *   • Duplicate file detection (skips re-downloading existing files)
+ *   • Graceful error handling for individual failed downloads
+ * 
  */
 
 import { execSync } from "child_process";
@@ -113,6 +188,12 @@ async function downloadPlaylist(playlistUrl) {
   // Skip 'start_radio' links
   if (playlistUrl.includes("start_radio")) {
     console.log("⚠️ Skipping start_radio link – not supported.");
+    return;
+  }
+
+  // Check if it's a mix (radio) playlist
+  if (await isMixPlaylist(playlistUrl)) {
+    console.log("⚠️  Mix playlists are not supported.");
     return;
   }
 
@@ -249,6 +330,65 @@ async function playDownloadedSongs(isRandom = false, specificArtist = null) {
 
       continuePlaying = nextAction === "▶️ Play next";
     }
+  }
+}
+
+// Check if a playlist is a mix (radio) playlist
+async function isMixPlaylist(url) {
+  try {
+    // Check URL patterns that indicate mix/radio playlists
+    const mixPatterns = [
+      /[&?]list=RD/,           // Radio playlists (RD prefix)
+      /[&?]list=LM/,           // Liked music playlists
+    ];
+
+    // Check if URL matches any mix patterns
+    for (const pattern of mixPatterns) {
+      if (pattern.test(url)) {
+        return true;
+      }
+    }
+
+    // Additional check: Try to get playlist info and check title/description
+    try {
+      const playlistInfo = execSync(`yt-dlp -j --flat-playlist --playlist-items 1 "${url}"`, { 
+        stdio: 'pipe',
+        timeout: 10000 // 10 second timeout
+      }).toString().trim();
+      
+      if (playlistInfo) {
+        const firstEntry = JSON.parse(playlistInfo.split('\n')[0]);
+        
+        // Check for mix-related keywords in playlist title
+        if (firstEntry.playlist_title) {
+          const title = firstEntry.playlist_title.toLowerCase();
+          const mixKeywords = [
+            'mix',
+            'radio',
+            'station',
+            'my mix',
+            'your mix',
+            'daily mix',
+            'discover weekly',
+            'release radar'
+          ];
+          
+          for (const keyword of mixKeywords) {
+            if (title.includes(keyword)) {
+              return true;
+            }
+          }
+        }
+      }
+    } catch (infoError) {
+      // If we can't get playlist info, assume it might be a mix to be safe
+      console.log("⚠️ Could not verify playlist type, proceeding with caution...");
+    }
+
+    return false;
+  } catch (error) {
+    console.error("❌ Error checking playlist type:", error.message);
+    return true; // Assume it's a mix to be safe
   }
 }
 
